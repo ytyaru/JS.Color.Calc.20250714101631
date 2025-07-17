@@ -12,39 +12,32 @@ class ColorScheme {
     constructor(back, fore=null, weight=400) {
         this._ = {}
         this._.back = Color.of(back);
-        if (!Color.isColor(this._.back)) {throw new TypeError(`第一引数はColorインスタンスかそれを生成できる値であるべきです。`)}
+        if (!Color.is(this._.back)) {throw new TypeError(`第一引数はColorインスタンスかそれを生成できる値であるべきです。`)}
         this._.fore = Color.of(fore);
-        this._.fore = Color.isColor(this._.fore) ? this._.fore : this.mono;
+        this._.fore = Color.is(this._.fore) ? this._.fore : this.back.mono;
         this._.weight = this.isWeight(weight) ? weight : 400;
     }
     get back() {return this._.back}
-    set back(v) {this._.back=Color.toColor(v)}
+    set back(v) {this._.back=Color.of(v)}
     get fore() {return this._.fore}
-    set fore(v) {this._.fore=Color.toColor(v)}
+    set fore(v) {this._.fore=Color.of(v)}
     get weight() {return this._.weight}
     set weight(v) {if (this.isWeight(v)) {this._.weight=v}}
     get lc() {return APCA.calc(this._.fore, this._.back)}
+    get c() {return WCAG.contrast(this._.fore, this._.back)}
     get minSize() {return MinFontSize.get(this.lc, this.weight)}
-    get mono() {
-        const cands = 'white black'.map(c=>[c, chroma.contrastAPCA(c, this._.back.hex())]);
-        cands.sort((a,b)=>b[1] - a[1]);
-        return chroma(cands[0][0]);
-    }
     get swapped() {return new ColorScheme(this.fore, this.back, this.weight)}
     swap() {const tmp = this.back; this.back = this.fore; this.fore = tmp;}
     isWeight(v) {return Number.isSafeInteger(v) && [...Array(9)].map((_,i)=>(i+1)*100).some(x=>x===v)}
     get isDark() {return this.lc < 0}
-    get level() {return Math.min(MESSAGE.length-1, Math.floor(Math.abs(this.lc)/15))}
-    get message() {return MESSAGE[this.level]}
-    /*
-    calcFores(num=8, startHue=0) {// 背景色から前景色を生成する
-        // LCH(L=0〜1, C=0〜0.4, H=0〜360)
-        chroma.oklch()
+    get level() {return Math.min(ColorScheme.MESSAGES.length-1, Math.floor(Math.abs(this.lc)/15))}
+    get threshold() {return this.level * 15}
+    get message() {return ColorScheme.MESSAGES[this.level]}
+    update(back, fore, weight) {
+        this.back = back ?? this.back;
+        this.fore = fore ?? this.fore;
+        this.weight = weight ?? this.weight;
     }
-    get fores() {
-
-    }
-    */
 }
 class MinFontSize {
     static _fontMatrixAscend = [
@@ -75,7 +68,6 @@ class MinFontSize {
         [120,33,21,16.5,11,10.75,10.5,10.25,13,15],
         [125,32,20,16,10,10,10,10,12,14],
     ];
-    // [100,200,300,400,500,600,700,800,900].some(v=>v===weight)
     static isWeight(v) {return Number.isSafeInteger(v) && [...Array(9)].map((_,i)=>(i+1)*100).some(x=>x===v)}
     static get(lc, weight) {
         const LC = Math.abs(lc);
@@ -85,154 +77,87 @@ class MinFontSize {
         else {return table[i]}// weight 100〜900までの9つのsizeを配列で返す
     }
 }
-// 反転色、補色、輝度、コントラスト差を取得する（コントラスト差4.5以上がアクシビリティ的な有効値である）
-//https://simplesimples.com/web/markup/javascript/color_complement/
-// Color.of('#000') -> '#FFF'
-class Color {
-    static get threshold() {return {// WCAGとAPCAの閾値 https://gihyo.jp/article/2023/08/apca-02
-        WCAG: [7, 4.5, 3],
-        APCA: [90, 75, 60, 45, 30, 15, -1],// 前者3つはWCAG互換
-        msg: [//APCA
-            '本文に推奨される', 
-            '本文が満たすべき',
-            '読める字（非本文）',
-            '見出しなど大きく太い字なら読める(36px/400, 24px/700)',
-            '字が満たすべき最低値(著作権表示やプレースホルダーなど主要ではないが読める必要のある字)',
-            '非字が満たすべき最低値(アイコン等が識別できる)',
-            '人には見えないと扱うべき',
-        ],
-    }}
-    static of(...args) {// 16進数文字列(#RGB, #RRGGBB, #RGBA, #RRGGBBAA), 10進数値0〜255(R,G,B(,A))の形式に対応する A=0(透明),1
-        args = [...args]
-        if (this.isColor(args[0])) {return args[0]}
-        let v = this.numsToCode(args);
-        if (v) {return new Color(v)}
-        v = this.codeToNums(...args);
-        if (v) {return new Color(v, false, args[0].length-1)}
-        return null;
-    }
-    static codeToNums(code) {
-        console.log(code)
-        if (!('string'===typeof code || code instanceof String)) {return null}
-        const match = code.match(/^#([0-9a-fA-F]{3}){1,2}([0-9a-fA-F]{2})?$/);
-        if (!match) {return null}
-        const colStr = code.slice(1);
-             if ([3,4].some(l=>l===colStr.length)) {return [...colStr].map(c=>parseInt(c,16)*256);}//#RGB(A)
-        else if ([6,8].some(l=>l===colStr.length)) {return colStr.match(/.{2}/g).map(c=>parseInt(c,16));}//#RRGGBB(AA)
-        else {return null}
-    }
-    static numsToCode(nums, isShort=false) {
-        console.log(nums, this.isNums(nums));
-        if (this.isNums(nums)) {
-        //if (Array.isArray(nums) && 3===nums.length || 4===nums.length && nums.every(n=>0<=n && n<=255)) {
-            const isShortable = nums.every(n=>0===(n%16));
-            const strs = nums.map(n=>n.toString(16).padStart(((isShortable && isShort) ? 1 : 2), '0'));
-            return `#${strs.join('')}`
-        }
-        else {return null}
-    }
-    static isNums(nums) {return (Array.isArray(nums) && 3===nums.length || 4===nums.length && nums.every(n=>Number.isSafeInteger(n) && 0<=n && n<=255))}
-    //static isNums(nums) {return (Array.isArray(nums) && 3===nums.length || 4===nums.length && nums.every(n=>Number.isSafeInteger(n) && 0<=n && n<=255))}
-//    static isCode(code) {return (('string'===typeof code || code instanceof String) && code.match(/^#([0-9a-fA-F]{3}){1,2}([0-9a-fA-F]{2})?$/));}
-    static isCode(code) {return (('string'===typeof code || code instanceof String) && !!code.match(/^#([0-9a-fA-F]{3}){1,2}([0-9a-fA-F]{2})?$/));}
-//    static isCode(code) {return (('string'===typeof code || code instanceof String) && /^#([0-9a-fA-F]{3}){1,2}([0-9a-fA-F]{2})?$/.test(code))}
-    static isColor(color) {return color instanceof Color;}
-    static toColor(value) {
-        console.log(value, this.isNums(value), this.isCode(value), this.isColor(value))
-             if (this.isNums(value)) {return new Color(value)}
-        else if (this.isCode(value)) {return new Color(this.codeToNums(value))}
-        else if (this.isColor(value)) {return value}
-        else {throw new TypeError(`引数は[R,G,B(,A)]か#R(R)G(G)B(B)(A(A))であるべきです。`)}
-    }
-    constructor(nums, isNums=false, figs=0) {
-        console.log(nums)
-        if (!Color.isNums(nums)){throw new TypeError(`第一引数は0〜255の数が3〜4つある配列であるべきです。`)}
-//        if (!Color.numsToCode(nums)){throw new TypeError(`第一引数は0〜255の数が3〜4つある配列であるべきです。`)}
-//        if (3===nums.length) {nums.push(-1)}
-        //this._ = {R:nums[0], G:nums[1], B:nums[2], A:nums[3], isNums:false, figs:0}
-        this._ = {nums:[...nums], hasAlpha:(3 < nums.length), isNums:false, figs:0}
-        this.isNums = isNums;
-        this.figs = figs;
-//        this._.nums = [...nums];
-//        if (3===this._.nums.length) {this._.nums.push(-1)}
-//        this._.nums = [this._.R, this._.G, this._.B];
-//        if (-1 < this._.A) {this._.nums.push(this._.A)}
+class RGBAInt {//[R,G,B(,A)]
+    static is(v) {return Array.isArray(v) && (3===v.length || 4===v.length) && v.every(n=>this.#isN(n))}
+    static #isN(n) {return Number.isSafeInteger(n) && 0<=n && n<=255}
+    constructor(nums) {
+        this._ = {nums:[...nums], hasAlpha:(4===nums.length && this.#isN(nums[3]))}
+        if (3===nums.length) {this._.nums.push(255)}
+        if (!RGBAInt.is(this._.nums)){throw new TypeError(`引数は[R,G,B(,A)]であるべきです。各値は0〜255迄のNumber型整数値です。:${nums}`)}
     }
     get R() {return this._.nums[0]}
     get G() {return this._.nums[1]}
     get B() {return this._.nums[2]}
-    get A() {return this._.hasAlpha ? this._.nums[3] : null}
-    set R(v) {if (Number.isSafeInteger(v) && 0<=v && v<=255){this._.nums[0]=v}}
-    set G(v) {if (Number.isSafeInteger(v) && 0<=v && v<=255){this._.nums[1]=v}}
-    set B(v) {if (Number.isSafeInteger(v) && 0<=v && v<=255){this._.nums[2]=v}}
-    set A(v) {if (Number.isSafeInteger(v) && 0<=v && v<=255){this._.nums[3]=v; this._.hasAlpha=true;}else if(null===v){this._.nums[3]=255;this._.hasAlpha=false;}}
+    get A() {return this._.nums[3]}
+    set R(v) {if(this.#isN(v)){this._.nums[0]=v}}
+    set G(v) {if(this.#isN(v)){this._.nums[1]=v}}
+    set B(v) {if(this.#isN(v)){this._.nums[2]=v}}
+    set A(v) {if(this.#isN(v)){this._.nums[3]=v}else if(-1===v || null===v){this._.nums[3]=255;this._.hasAlpha=false;}}
     get nums() {return [...this._.nums]}
-    get code() {console.log();return Color.numsToCode(this._.nums, -Infinity===this.figs)}
     set nums(v) {
-//        console.log(Color.isNums(v));
-        if (Color.isNums(v)) {
-//        if (Color.numsToCode(v, -Infinity===this.figs)) {
+        if (RGBAInt.is(v)) {
             v.map((V,i)=>this._.nums[i]=V);
-//            'R G B'.map((n,i)=>this._[n] = this._.nums[i]);
-//            if (4===v.length) {this._.A = this._.nums[3]}
-//            if (4===v.length) {this._.A = this._.nums[3]}
         }
     }
-    set code(v) {
-        const nums = Coolor.codeToNums(v);
-        if (nums) {this.nums = v;}
-    }
-    // 返却値の型（数列／文字列）
-    get isNums() {return this._.isNums}
-    set isNums(v) {this._.isNums = !!v}
-    // 返却値が文字列の時の桁数（0:未設定(数列で生成された場合), -1:可能なら入力値に合わせる, -Infinity:可能なら短くする(#FFCCAA->#FCA), Infinity:可能な限り長くする(#FCA->#FFCCAA)）
-    get figs() {return this._.figs}
-    set figs(v) {if ([-2,-1,0,3,6,8].some(x=>x===v)){this._.figs=v}}
     get hasAlpha() {return this._.hasAlpha}
-    set hasAlpha(v) {this._.hasAlpha = !!v}
-
-    // 反転色
-    get reversal() {
-        //const nums = [255 - this._.R, 255 - this._.G, 255 - this._.B];
-        const nums = [255 - this.R, 255 - this.G, 255 - this.B];
-        //if (-1 < this._.A) {nums.push(255-this._.A)}
-        if (null!==this.A || -1 < this.A) {nums.push(255-this.A)}
-        if (this._.isNums) {return nums}
-        else {return Color.numsToCode(nums, -Infinity===this.figs)}
+}
+class RGBAStr extends RGBAInt {//#RGB(A), #RRGGBB(AA)
+    static is(code) {return this.#isStr(code) && !!code.match(/^#([0-9a-fA-F]{3}){1,2}([0-9a-fA-F]{2})?$/);}
+    static #isStr(v){return ('string'===typeof v || v instanceof String)}
+    static #throw(v) {throw new TypeError(`引数は#RGB(A)か#RRGGBB(AA)であるべきです。RGBA各値は16進数0〜Fです。`)}
+    static toNums(code) {
+        if (!this.is(code)) {this.#throw()}
+        const CODE = code.slice(1);
+             if ([3,4].some(l=>l===CODE.length)) {return [...CODE].map(c=>parseInt(c,16)*16);}//#RGB(A)
+        else if ([6,8].some(l=>l===CODE.length)) {return CODE.match(/.{2}/g).map(c=>parseInt(c,16));}//#RRGGBB(AA)
+        else {this.#throw()}
     }
-    // 補色(彩度や明度は同値で色相のみ変わる)
-    get complementary() {
-//        const max = Math.max(this._.R, this._.G, this._.B),
-//              min =  Math.min(this._.R, this._.G, this._.B);
+    constructor(v) {super(RGBAInt.is(v) ? v : RGBAStr.toNums(v))}
+}
+class Color extends RGBAStr {
+    static is(v) {return (v instanceof Color) || RGBAStr.is(v) || RGBAInt.is(v)}
+    static of(v) {
+             if (v instanceof Color) {return v}
+        else if (RGBAInt.is(v) || RGBAStr.is(v)){return new Color(v)}
+        else {throw new TypeError(`引数は[R,G,B(,A)]か#R(R)G(G)B(B)(A(A))であるべきです。`)}
+    }
+    constructor(numsOrCode, isShortCode=false) {
+        super(numsOrCode);
+        this._.isShortCode = isShortCode;
+    }
+    get nums() {return this.hasAlpha ? [...this._.nums] : this._.nums.slice(0,3)}
+    get code() {
+        const nums = this.hasAlpha ? this.nums : this.nums.slice(0,3)
+        const isShortable = nums.every(n=>0===(n%16));
+        const strs = nums.map(n=>n.toString(16).padStart(((isShortable && this._.isShortCode) ? 1 : 2), '0'));
+        return `#${strs.join('')}`
+    }
+    get reversal() {// 反転色
+        const nums = [255 - this.R, 255 - this.G, 255 - this.B];
+        if (this.hasAlpha) {nums.push(255-this.A)}
+        return new Color(nums);
+    }
+    get complementary() {// 補色(彩度や明度は同値で色相のみ変わる)
         const max = Math.max(this.R, this.G, this.B),
               min =  Math.min(this.R, this.G, this.B);
         const complement = max + min;
-//        const nums = [complement - this._.R, complement - this._.G, complement - this._.B];
         const nums = [complement - this.R, complement - this.G, complement - this.B];
-//        if (-1 < this._.A) {nums.push(this._.A)}
-//        if (-1 < this.A) {nums.push(this.A)}
-        if (null!==this.A || -1 < this.A) {nums.push(this.A)}
-        if (this._.isNums) {return nums}
-        else {return Color.numsToCode(nums, -Infinity===this.figs)}
+        if (this.hasAlpha) {nums.push(this.A)}
+        return new Color(nums);
     }
     get mono() {//モノトーン（白／黒）を返す
         const colors = [[0,0,0],[255,255,255]].map(nums=>new Color(nums));
-        colors.sort((a,b)=>this.contrast(b) - this.contrast(a));
-        if (this.contrast(colors[0]) < 4.5) {throw new TypeError(`白黒共にWCAG AA 4.5を満たしません。`)}
-        return colors[0];
+        return colors.sort((a,b)=>WCAG.contrast(this, b) - WCAG.contrast(this, a))[0];
     }
-    // APCA 0〜108
-    lc(foreClr, backClr, figs=2) {console.log(foreClr, backClr, figs);return Math.abs(APCA.calc(foreClr ?? this, backClr ?? this, figs))}
-    // WCAG 1〜21。4.5以上ならOK(WCAG AA) 白黒なら21。
-    contrast(color1, color2) {return WCAG.contrast(color1 ?? this, color2 ?? this)}
-    // 最低フォントサイズを取得する
-    getFontSize(fore, back, weight=-1) {return APCA.getFontSize(fore ?? this, back ?? this, weight)}
 }
 // https://www.google.co.jp/search?q=js+%E8%89%B2+%E3%82%B3%E3%83%B3%E3%83%88%E3%83%A9%E3%82%B9%E3%83%88%E5%B7%AE+%E7%AE%97%E5%87%BA
 class WCAG {
     static contrast(color1, color2) {//返却値1〜21。4.5以上ならOK(WCAG AA) 白黒なら21。
-        color1 = Color.toColor(color1)
-        color2 = Color.toColor(color2)
+//        [color1, color2].map(c=>{if (!(c instanceof Color)) {}})
+        if (!(color1 instanceof Color)) {color1 = Color.of(color1)}
+        if (!(color2 instanceof Color)) {color2 = Color.of(color2)}
+//        color1 =  Color.of(color1)
+//        color2 = Color.of(color2)
         if (!(color2 instanceof Color)) {color2=this}
         const lum1 = this.luminance(color1);
         const lum2 = this.luminance(color2);
@@ -241,8 +166,9 @@ class WCAG {
         return (brightest + 0.05) / (darkest + 0.05);
     }
     static luminance(color) {//輝度？ contrastの内部関数
-        const c = Color.toColor(color);
-        const [R,G,B] = 'R G B'.split(' ').map(n=>c._[n]/255);
+        const c = color instanceof Color ? color : Color.of(color);
+//        const c = Color.of(color);
+        const [R,G,B] = 'R G B'.split(' ').map(n=>c[n]/255);
         const a = [R, G, B].map((v) => {
             return v <= 0.03928
             ? v / 12.92
@@ -287,9 +213,8 @@ const SA98G = {
 class APCA {
     // LC(Luminance Contrast) 
     static calc(fore, back, places = -1, round = true) {
-        const backClr = Color.toColor(back);
-        let foreClr = Color.toColor(fore);
-        //const hasAlpha = (foreClr._.A === -1 || foreClr._.A === 255) ? false : true;
+        const backClr = Color.of(back);
+        let foreClr = Color.of(fore);
         const hasAlpha = (foreClr.A === -1 || foreClr.A === 255) ? false : true;
         if (hasAlpha) { foreClr = Color.of(this._alphaBlend( foreClr, backClr, round)); };
         console.log(foreClr, fore);
@@ -383,6 +308,7 @@ class APCA {
         else {return table[i]}// weight 100〜900までの9つのsizeを配列で返す
     }
 }
+window.ColorScheme = ColorScheme;
 window.Color = Color;
 window.APCA = APCA;
 })();
